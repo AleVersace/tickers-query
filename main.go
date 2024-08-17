@@ -1,8 +1,29 @@
+/* Build lambda and execute:
+linux:
+
+GOOS=linux GOARCH=amd64 go build -tags lambda.norpc -o bootstrap main.go
+
+win:
+$env:GOOS = "linux"
+$env:GOARCH = "amd64"
+$env:CGO_ENABLED = "0"
+go build -tags lambda.norpc -o bootstrap main.go
+~\Go\Bin\build-lambda-zip.exe -o myFunction.zip bootstrap
+
+
+update function:
+
+aws lambda update-function-code --function-name myFunction \
+--zip-file fileb://myFunction.zip
+*/
+
 package main
 
 import (
+	"context"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
+	"github.com/aws/aws-lambda-go/lambda"
 	"log"
 	"net/http"
 	"strconv"
@@ -17,10 +38,10 @@ const bitSize = 64
 const targetPerc = -19.0
 
 func main() {
-	priceJob()
+	lambda.Start(HandleRequest)
 }
 
-func priceJob() {
+func HandleRequest(ctx context.Context) (*string, error) {
 	tickers := [3]string{"BQE.V", "HAYPP.ST", "MOB.ST"}
 	client := &http.Client{}
 	for _, ticker := range tickers {
@@ -47,6 +68,9 @@ func priceJob() {
 		extractPrice(doc, ticker)
 		time.Sleep(2000)
 	}
+
+	message := fmt.Sprintf("Price job done!")
+	return &message, nil
 }
 
 func extractPrice(doc *goquery.Document, ticker string) {
