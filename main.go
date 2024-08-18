@@ -20,12 +20,11 @@ aws lambda update-function-code --function-name myFunction \
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/sns"
 	"github.com/joho/godotenv"
 	"log"
 	"net/http"
@@ -40,6 +39,11 @@ const yahooFinanceURL = "https://finance.yahoo.com/quote/"
 const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 const bitSize = 64
 const targetPerc = -19.0
+
+type TelegramMessage struct {
+	ChatID string `json:"chat_id"`
+	Text   string `json:"text"`
+}
 
 func main() {
 	_ = godotenv.Load()
@@ -118,30 +122,28 @@ func checkTarget(currentPrice float64, maxPrice float64, ticker string, currency
 		message := fmt.Sprintf("Target reached on %s!\nCurrent price: %.2f %s\n54w high: %.2f %s\nDifference: %.2f%%\n", ticker, currentPrice, currency, maxPrice, currency, currentPerc)
 		log.Println(message)
 
-		snsTopicArn := os.Getenv("SNS_TOPIC_ARN")
-		err := sendSNSNotification(message, snsTopicArn)
+		tgBotToken := os.Getenv("TG_BOT_TOKEN")
+		tgChatID := os.Getenv("TG_CHAT_ID")
+		err := sendTgNotification(message, tgBotToken, tgChatID)
 		if err != nil {
 			log.Fatal("Error sending SNS notification:", err)
 		}
 	}
 }
 
-func sendSNSNotification(message, topicARN string) error {
-	sess, err := session.NewSession(&aws.Config{
-		Region: aws.String("eu-central-1"),
-	})
+func sendTgNotification(message string, botToken string, chatID string) error {
+	url := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
+
+	telegramMessage := TelegramMessage{
+		ChatID: chatID,
+		Text:   message,
+	}
+
+	body, err := json.Marshal(telegramMessage)
 	if err != nil {
-		log.Fatalf("Failed to create aws session: %v", err)
 		return err
 	}
 
-	svc := sns.New(sess)
-
-	input := &sns.PublishInput{
-		Message:  aws.String(message),
-		TopicArn: aws.String(topicARN),
-	}
-
-	_, err = svc.Publish(input)
+	_, err = http.Post(url, "application/json", bytes.NewBuffer(body))
 	return err
 }
