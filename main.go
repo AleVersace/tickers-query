@@ -24,6 +24,9 @@ import (
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/sns"
 	"log"
 	"net/http"
 	"strconv"
@@ -112,4 +115,24 @@ func checkTarget(currentPrice float64, maxPrice float64) {
 	if currentPerc <= targetPerc {
 		log.Printf("Target reached! %.2f", currentPerc)
 	}
+}
+
+func sendSNSNotification(message, topicARN string) error {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String("eu-central-1"),
+	})
+	if err != nil {
+		log.Fatalf("Failed to create aws session: %v", err)
+		return err
+	}
+
+	svc := sns.New(sess)
+
+	input := &sns.PublishInput{
+		Message:  aws.String(message),
+		TopicArn: aws.String(topicARN),
+	}
+
+	_, err = svc.Publish(input)
+	return err
 }
