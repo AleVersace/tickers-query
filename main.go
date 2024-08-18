@@ -27,8 +27,10 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sns"
+	"github.com/joho/godotenv"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +43,7 @@ const bitSize = 64
 const targetPerc = -19.0
 
 func main() {
+	_ = godotenv.Load()
 	lambda.Start(HandleRequest)
 }
 
@@ -104,16 +107,23 @@ func extractPrice(doc *goquery.Document, ticker string) {
 			return
 		}
 
-		checkTarget(priceFloat, maxPriceFloat)
+		checkTarget(priceFloat, maxPriceFloat, ticker, currency)
 	} else {
 		log.Println("Could not find the stock price.")
 	}
 }
 
-func checkTarget(currentPrice float64, maxPrice float64) {
+func checkTarget(currentPrice float64, maxPrice float64, ticker string, currency string) {
 	currentPerc := ((currentPrice - maxPrice) / maxPrice) * 100
 	if currentPerc <= targetPerc {
-		log.Printf("Target reached! %.2f", currentPerc)
+		message := fmt.Sprintf("Target reached on %s!\nCurrent price: %.2f %s\n54w high: %.2f %s\nDifference: %.2f%%\n", ticker, currentPrice, currency, maxPrice, currency, currentPerc)
+		log.Println(message)
+
+		snsTopicArn := os.Getenv("SNS_TOPIC_ARN")
+		err := sendSNSNotification(message, snsTopicArn)
+		if err != nil {
+			log.Fatal("Error sending SNS notification:", err)
+		}
 	}
 }
 
