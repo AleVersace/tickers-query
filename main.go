@@ -51,7 +51,7 @@ func main() {
 }
 
 func HandleRequest() (*string, error) {
-	tickers := [3]string{"BQE.V", "HAYPP.ST", "MOB.ST"}
+	tickers := [9]string{"BQE.V", "HAYPP.ST", "TVK.TO", "SGN.WA", "CPH.TO", "CLPT", "SLYG.F"}
 	client := &http.Client{}
 	for _, ticker := range tickers {
 		url := yahooFinanceURL + ticker + "/"
