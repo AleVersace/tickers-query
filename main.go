@@ -20,7 +20,6 @@ aws lambda update-function-code --function-name myFunction \
 package main
 
 import (
-	"context"
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/aws/aws-lambda-go/lambda"
@@ -47,7 +46,7 @@ func main() {
 	lambda.Start(HandleRequest)
 }
 
-func HandleRequest(ctx context.Context) (*string, error) {
+func HandleRequest() (*string, error) {
 	tickers := [3]string{"BQE.V", "HAYPP.ST", "MOB.ST"}
 	client := &http.Client{}
 	for _, ticker := range tickers {
