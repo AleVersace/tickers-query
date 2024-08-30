@@ -25,6 +25,10 @@ import (
 	"fmt"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/aws/aws-lambda-go/lambda"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go/service/dynamodb/dynamodbattribute"
 	"github.com/joho/godotenv"
 	"log"
 	"net/http"
@@ -40,9 +44,16 @@ const userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 
 const bitSize = 64
 const targetPerc = -19.0
 
+const tableNameDDB = "QueryStocks"
+
 type TelegramMessage struct {
 	ChatID string `json:"chat_id"`
 	Text   string `json:"text"`
+}
+
+type StockState struct {
+	Ticker   string `json:"ticker"`
+	LastDate string `json:"lastDate"`
 }
 
 func main() {
@@ -53,7 +64,19 @@ func main() {
 func HandleRequest() (*string, error) {
 	tickers := [7]string{"BQE.V", "HAYPP.ST", "TVK.TO", "SGN.WA", "CPH.TO", "CLPT", "SLYG.F"}
 	client := &http.Client{}
+
+	sessionDDB := session.Must(session.NewSession(&aws.Config{
+		Region: aws.String("eu-central-1"), // Change to your desired region
+	}))
+	svc := dynamodb.New(sessionDDB)
+
 	for _, ticker := range tickers {
+
+		sent, err := checkStockNotifSent(svc, ticker)
+		if err != nil || sent {
+			continue
+		}
+
 		url := yahooFinanceURL + ticker + "/"
 		// request
 		req, err := http.NewRequest("GET", url, nil)
@@ -74,7 +97,7 @@ func HandleRequest() (*string, error) {
 		if err != nil {
 			log.Fatal("Error during body Close: ", err)
 		}
-		extractPrice(doc, ticker)
+		extractPrice(svc, doc, ticker)
 		time.Sleep(2000)
 	}
 
@@ -82,7 +105,7 @@ func HandleRequest() (*string, error) {
 	return &message, nil
 }
 
-func extractPrice(doc *goquery.Document, ticker string) {
+func extractPrice(svc *dynamodb.DynamoDB, doc *goquery.Document, ticker string) {
 	// The stock price on the Yahoo Finance page is within a <fin-streamer> tag with a specific class
 	priceSelector := fmt.Sprintf("fin-streamer[data-field='regularMarketPrice'][data-symbol='%s']", ticker)
 	highLowPriceSelector := fmt.Sprintf("fin-streamer[data-field='fiftyTwoWeekRange'][data-symbol='%s']", ticker)
@@ -110,13 +133,13 @@ func extractPrice(doc *goquery.Document, ticker string) {
 			return
 		}
 
-		checkTarget(priceFloat, maxPriceFloat, ticker, currency)
+		checkTarget(svc, priceFloat, maxPriceFloat, ticker, currency)
 	} else {
 		log.Println("Could not find the stock price.")
 	}
 }
 
-func checkTarget(currentPrice float64, maxPrice float64, ticker string, currency string) {
+func checkTarget(svc *dynamodb.DynamoDB, currentPrice float64, maxPrice float64, ticker string, currency string) {
 	currentPerc := ((currentPrice - maxPrice) / maxPrice) * 100
 	if currentPerc <= targetPerc {
 		message := fmt.Sprintf("Target reached on %s!\nCurrent price: %.2f %s\n54w high: %.2f %s\nDifference: %.2f%%\n", ticker, currentPrice, currency, maxPrice, currency, currentPerc)
@@ -127,6 +150,11 @@ func checkTarget(currentPrice float64, maxPrice float64, ticker string, currency
 		err := sendTgNotification(message, tgBotToken, tgChatID)
 		if err != nil {
 			log.Fatal("Error sending SNS notification:", err)
+		}
+
+		err = stockSent(svc, ticker)
+		if err != nil {
+			log.Fatal("Error creating or updating {} table on {}!", tableNameDDB, ticker)
 		}
 	}
 }
@@ -146,4 +174,72 @@ func sendTgNotification(message string, botToken string, chatID string) error {
 
 	_, err = http.Post(url, "application/json", bytes.NewBuffer(body))
 	return err
+}
+
+/*
+Checks if stock notification has already been sent for today by querying dynamoDB table
+*/
+func checkStockNotifSent(svc *dynamodb.DynamoDB, ticker string) (bool, error) {
+	today := time.Now().Format("2006-01-02")
+
+	result, err := svc.GetItem(&dynamodb.GetItemInput{
+		TableName: aws.String(tableNameDDB),
+		Key: map[string]*dynamodb.AttributeValue{
+			"ticker": {
+				S: aws.String(ticker),
+			},
+		},
+	})
+	if err != nil {
+		fmt.Println("Error getting item:", err)
+		return false, err
+	}
+
+	var state StockState
+	if result.Item != nil {
+		err = dynamodbattribute.UnmarshalMap(result.Item, &state)
+		if err != nil {
+			fmt.Println("Failed to unmarshal:", err)
+			return false, err
+		}
+
+		// Check if the notification has already been sent today
+		if state.LastDate == today {
+			fmt.Println("Notification already sent for {} today!", ticker)
+			return true, nil
+		} else {
+			return false, nil
+		}
+	}
+	return false, nil // non-existent ticker in dynamo
+}
+
+/*
+Create or update ticker on dynamo with today's date signaling notification sent
+*/
+func stockSent(svc *dynamodb.DynamoDB, ticker string) error {
+	today := time.Now().Format("2006-01-02")
+
+	var state StockState
+	state = StockState{
+		Ticker:   ticker,
+		LastDate: today,
+	}
+
+	item, err := dynamodbattribute.MarshalMap(state)
+	if err != nil {
+		fmt.Println("Failed to marshal:", err)
+		return err
+	}
+
+	_, err = svc.PutItem(&dynamodb.PutItemInput{
+		TableName: aws.String(tableNameDDB),
+		Item:      item,
+	})
+	if err != nil {
+		fmt.Println("Failed to put item:", err)
+		return err
+	}
+
+	return nil
 }
