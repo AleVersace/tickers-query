@@ -149,7 +149,7 @@ func checkTarget(svc *dynamodb.DynamoDB, currentPrice float64, maxPrice float64,
 		tgChatID := os.Getenv("TG_CHAT_ID")
 		err := sendTgNotification(message, tgBotToken, tgChatID)
 		if err != nil {
-			log.Fatal("Error sending SNS notification:", err)
+			log.Fatal("Error sending telegram notification:", err)
 		}
 
 		err = stockSent(svc, ticker)
