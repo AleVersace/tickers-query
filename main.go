@@ -62,7 +62,6 @@ func main() {
 }
 
 func HandleRequest() (*string, error) {
-	tickers := [7]string{"BQE.V", "HAYPP.ST", "TVK.TO", "SGN.WA", "CPH.TO", "CLPT", "SLYG.F"}
 	client := &http.Client{}
 
 	sessionDDB := session.Must(session.NewSession(&aws.Config{
@@ -70,14 +69,24 @@ func HandleRequest() (*string, error) {
 	}))
 	svc := dynamodb.New(sessionDDB)
 
-	for _, ticker := range tickers {
+	fullScanDB, err := svc.Scan(&dynamodb.ScanInput{TableName: aws.String(tableNameDDB)})
+	if err != nil {
+		log.Fatal("Failed Tickers Scan on db.")
+	}
+	var stocks []StockState
+	err = dynamodbattribute.UnmarshalListOfMaps(fullScanDB.Items, &stocks)
+	if err != nil {
+		log.Fatal("Failed Unmarshal Stocks Scan from db.")
+	}
 
-		sent, err := checkStockNotifSent(svc, ticker)
-		if err != nil || sent {
+	for _, ticker := range stocks {
+
+		sent := checkStockNotifSent(ticker)
+		if sent {
 			continue
 		}
 
-		url := yahooFinanceURL + ticker + "/"
+		url := yahooFinanceURL + ticker.Ticker + "/"
 		// request
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
@@ -97,7 +106,7 @@ func HandleRequest() (*string, error) {
 		if err != nil {
 			log.Fatal("Error during body Close: ", err)
 		}
-		extractPrice(svc, doc, ticker)
+		extractPrice(svc, doc, ticker.Ticker)
 		time.Sleep(2000)
 	}
 
@@ -179,39 +188,16 @@ func sendTgNotification(message string, botToken string, chatID string) error {
 /*
 Checks if stock notification has already been sent for today by querying dynamoDB table
 */
-func checkStockNotifSent(svc *dynamodb.DynamoDB, ticker string) (bool, error) {
+func checkStockNotifSent(ticker StockState) bool {
 	today := time.Now().Format("2006-01-02")
 
-	result, err := svc.GetItem(&dynamodb.GetItemInput{
-		TableName: aws.String(tableNameDDB),
-		Key: map[string]*dynamodb.AttributeValue{
-			"ticker": {
-				S: aws.String(ticker),
-			},
-		},
-	})
-	if err != nil {
-		fmt.Println("Error getting item:", err)
-		return false, err
+	// Check if the notification has already been sent today
+	if ticker.LastDate == today {
+		fmt.Println("Notification already sent for {} today!", ticker)
+		return true
+	} else {
+		return false
 	}
-
-	var state StockState
-	if result.Item != nil {
-		err = dynamodbattribute.UnmarshalMap(result.Item, &state)
-		if err != nil {
-			fmt.Println("Failed to unmarshal:", err)
-			return false, err
-		}
-
-		// Check if the notification has already been sent today
-		if state.LastDate == today {
-			fmt.Println("Notification already sent for {} today!", ticker)
-			return true, nil
-		} else {
-			return false, nil
-		}
-	}
-	return false, nil // non-existent ticker in dynamo
 }
 
 /*
