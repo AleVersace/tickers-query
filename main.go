@@ -107,11 +107,11 @@ func HandleRequest() (*string, error) {
 
 func extractPrice(svc *dynamodb.DynamoDB, doc *goquery.Document, ticker string) {
 	// The stock price on the Yahoo Finance page is within a <fin-streamer> tag with a specific class
-	priceSelector := fmt.Sprintf("fin-streamer[data-field='regularMarketPrice'][data-symbol='%s']", ticker)
+	priceSelector := fmt.Sprintf("span[data-testid='qsp-price']")
 	highLowPriceSelector := fmt.Sprintf("fin-streamer[data-field='fiftyTwoWeekRange'][data-symbol='%s']", ticker)
 	currencySelector := ".exchange > :last-child"
 
-	price := doc.Find(priceSelector).Text()
+	price := strings.TrimSpace(doc.Find(priceSelector).Text())
 	highLowPrice := doc.Find(highLowPriceSelector).Text()
 
 	parts := strings.Split(highLowPrice, " - ")
